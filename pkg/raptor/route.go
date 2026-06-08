@@ -145,7 +145,7 @@ func (rt *RaptorTable) Route(start types.StopID, end types.StopID, startTime typ
 
 		stopsUpdatedByTransfer := mapset.NewSet[types.StopID]()
 
-		// interate over the stops updates and add all footpath transfers
+		// iterate over the stops updates and add all footpath transfers
 		// if that improves the best time for the transfer target
 		for stopId := range stopsUpdatedByRoute.Iter() {
 			offset := rt.Transfers.OffsetOfStop[stopId]
@@ -159,6 +159,7 @@ func (rt *RaptorTable) Route(start types.StopID, end types.StopID, startTime typ
 					rounds[round][target] = arrival
 					best[target] = arrival
 					stopsUpdatedByTransfer.Add(target)
+					// TODO: update parent for transfer leg
 				}
 			}
 		}

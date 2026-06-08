@@ -23,7 +23,7 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 	gtfsStopIdMap := enumerateGtfsStops(gtfsTable.Stops)
 	numStops := len(gtfsTable.Stops)
 	selfTransfers := extractSelfTransfers(gtfsTable.Transfers, gtfsStopIdMap)
-	transfers := transfer.CalculateTransfers(*gtfsTable)
+	transfers := transfer.CalculateTransfers(gtfsTable.Transfers, gtfsStopIdMap)
 
 	gtfsActiveTripIdMap := enumerateGtfsTrips(gtfsTable.TripsForDate(date))
 
