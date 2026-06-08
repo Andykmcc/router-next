@@ -1,8 +1,11 @@
 package raptor
 
 import (
-	"router/pkg/types"
 	"slices"
+
+	mapset "github.com/deckarep/golang-set/v2"
+
+	"router/pkg/types"
 )
 
 type Label struct {
@@ -75,7 +78,7 @@ func (rt *RaptorTable) Route(start types.StopID, end types.StopID, startTime typ
 		}
 
 		// the stops updated in this round to provide the updated set for the next round
-		var nextStopsUpdated []types.StopID
+		stopsUpdatedByRoute := mapset.NewSet[types.StopID]()
 
 		// traverse each route left to right
 		for routeId, firstStopIdx := range routeEarliestStop {
@@ -108,7 +111,7 @@ func (rt *RaptorTable) Route(start types.StopID, end types.StopID, startTime typ
 						// over all rounds
 						if arrivalTime < best[currStopId] {
 							best[currStopId] = arrivalTime
-							nextStopsUpdated = append(nextStopsUpdated, currStopId)
+							stopsUpdatedByRoute.Add(currStopId)
 						}
 					}
 				}
@@ -140,11 +143,28 @@ func (rt *RaptorTable) Route(start types.StopID, end types.StopID, startTime typ
 			}
 		}
 
-		// TODO: use precomputed street network transfers to update
-		// the best[s] and rounds[k][s] entries and add to nextStopsUpdated
+		stopsUpdatedByTransfer := mapset.NewSet[types.StopID]()
+
+		// interate over the stops updates and add all footpath transfers
+		// if that improves the best time for the transfer target
+		for stopId := range stopsUpdatedByRoute.Iter() {
+			offset := rt.Transfers.OffsetOfStop[stopId]
+
+			nextOffset := rt.Transfers.OffsetOfStop[stopId+1]
+			for idx := offset; idx < nextOffset; idx++ {
+				target := rt.Transfers.TransferTarget[idx]
+
+				arrival := rounds[round][stopId] + types.Timestamp(rt.Transfers.TransferWeights[idx].RealTime)
+				if arrival < best[target] {
+					rounds[round][target] = arrival
+					best[target] = arrival
+					stopsUpdatedByTransfer.Add(target)
+				}
+			}
+		}
 
 		// seed the next round with the updated stops for this round
-		stopsUpdated = nextStopsUpdated
+		stopsUpdated = stopsUpdatedByRoute.Union(stopsUpdatedByTransfer).ToSlice()
 	}
 
 	// if we never got to the destination, fail

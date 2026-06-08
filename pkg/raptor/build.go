@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"router/pkg/gtfs"
+	"router/pkg/transfer"
 	"router/pkg/types"
 	"router/pkg/utils"
 )
@@ -22,6 +23,7 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 	gtfsStopIdMap := enumerateGtfsStops(gtfsTable.Stops)
 	numStops := len(gtfsTable.Stops)
 	selfTransfers := extractSelfTransfers(gtfsTable.Transfers, gtfsStopIdMap)
+	transfers := transfer.CalculateTransfers(*gtfsTable)
 
 	gtfsActiveTripIdMap := enumerateGtfsTrips(gtfsTable.TripsForDate(date))
 
@@ -38,6 +40,7 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 		Stops:                   gtfsTable.Stops,
 		Routes:                  routes,
 		MinTransferTime:         selfTransfers,
+		Transfers:               *transfers,
 		StopIdsByRoute:          stopIdsByRoute,
 		FirstStopIdOfRoute:      firstStopIdOfRoute,
 		StopEventsByRoute:       stopEventsByRoute,

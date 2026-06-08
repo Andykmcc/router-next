@@ -3,6 +3,7 @@ package raptor
 import (
 	"fmt"
 	"router/pkg/gtfs"
+	"router/pkg/transfer"
 	"router/pkg/types"
 	"router/pkg/utils"
 )
@@ -47,6 +48,7 @@ type RaptorTable struct {
 	Routes []gtfs.GTFSRoute
 
 	MinTransferTime StopTransferTimes
+	Transfers       transfer.TransferTable
 
 	StopIdsByRoute     []types.StopID
 	FirstStopIdOfRoute RouteStopOffsets
