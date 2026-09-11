@@ -1,28 +1,38 @@
 <html>
 
 <head>
-    <script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
-    <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src='https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.js'></script>
+    <link href='https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css' rel='stylesheet' />
 </head>
 
 <body>
     <div style="display:flex;">
         <div id='map' style='width: 850px; height: 700px;'></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
-            <!-- <label style="display:flex;flex-direction:column;">
+            <label style="display:flex;flex-direction:column;">
                 <span>Start Stop Id</span>
-                <input id="start" placeholder="15279" />
+                <input id="start" placeholder="0" />
             </label>
             <label style="display:flex;flex-direction:column;">
                 <span>End Stop Id</span>
-                <input id="end" placeholder="54788" />
-            </label> -->
+                <input id="end" placeholder="1" />
+            </label>
             <label style="display:flex;flex-direction:column;">
-                <span>Route ID</span>
-                <input id="routeId" placeholder="1" />
+                <span>Depart (HH:MM)</span>
+                <input id="time" value="08:00" />
             </label>
             <button id="route" onclick="route()">Route</button>
-            <div id="resp-stops"></div>
+            <div id="resp-stops" style="white-space:pre-wrap;font-family:monospace;"></div>
+
+            <hr style="width:100%;" />
+
+            <label style="display:flex;flex-direction:column;">
+                <span>Route ID</span>
+                <input id="routeId" placeholder="SF:15" />
+            </label>
+            <button id="routeStops" onclick="lookupRouteStops()">Get Route Stops</button>
+            <textarea id="route-stops-out" rows="8" readonly
+                style="font-family:monospace;white-space:pre-wrap;"></textarea>
         </div>
     </div>
 
@@ -34,11 +44,77 @@
             zoom: 12 // starting zoom
         });
 
+        let drawn = [];
+
+        function clearJourneys() {
+            for (const id of drawn) {
+                if (map.getLayer(id)) map.removeLayer(id);
+                if (map.getSource(id)) map.removeSource(id);
+            }
+            drawn = [];
+        }
+
         async function route() {
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const time = document.getElementById('time').value;
+
+            const resp = await fetch(`http://localhost:3456/route?start=${start}&end=${end}&time=${time}`);
+            if (!resp.ok) {
+                document.getElementById('resp-stops').innerText = `Error ${resp.status}: ${await resp.text()}`;
+                return;
+            }
+
+            const data = await resp.json();
+            clearJourneys();
+
+            const lines = [];
+            const bounds = new maplibregl.LngLatBounds();
+
+            data.journeys.forEach((j, ji) => {
+                lines.push(`Journey ${ji}: arrive ${j.arrivalTime}s, ${j.numTransitLegs} transit leg(s)`);
+                j.legs.forEach((leg, li) => {
+                    const coords = [[leg.from.lon, leg.from.lat], [leg.to.lon, leg.to.lat]];
+                    coords.forEach(c => bounds.extend(c));
+
+                    const id = `j${ji}-l${li}`;
+                    map.addSource(id, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } } });
+                    map.addLayer({
+                        id,
+                        type: 'line',
+                        source: id,
+                        paint: {
+                            'line-width': 4,
+                            'line-color': leg.kind === 'transit' ? '#1e6fff' : '#e0662b',
+                            'line-dasharray': leg.kind === 'transit' ? [1] : [2, 2],
+                        },
+                    });
+                    drawn.push(id);
+
+                    const label = leg.kind === 'transit'
+                        ? `  transit ${leg.route ? leg.route.shortName : '?'}: ${leg.from.name} -> ${leg.to.name}`
+                        : `  ${leg.kind} ${leg.transferSeconds}s: ${leg.from.name} -> ${leg.to.name}`;
+                    lines.push(label);
+                });
+            });
+
+            document.getElementById('resp-stops').innerText = lines.join('\n') || 'No journeys found';
+            if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 60 });
+        }
+
+        async function lookupRouteStops() {
             const routeId = document.getElementById('routeId').value;
-            const response = await fetch(`http://localhost:3456/routes/${routeId}/stops`);
-            const newRoute = await response.json();
-            document.getElementById('resp-stops').innerText = newRoute.join(", ");
+            const out = document.getElementById('route-stops-out');
+
+            const params = new URLSearchParams({ routeId });
+            const resp = await fetch(`http://localhost:3456/routes/stops?${params}`);
+            if (!resp.ok) {
+                out.value = `Error ${resp.status}: ${await resp.text()}`;
+                return;
+            }
+
+            const stops = await resp.json();
+            out.value = stops.join(', ');
         }
     </script>
 </body>

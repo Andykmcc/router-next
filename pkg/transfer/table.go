@@ -7,5 +7,6 @@ import (
 type TransferTable struct {
 	OffsetOfStop    []uint32
 	TransferTarget  []types.StopID
+	TransferModes   []types.TransferMode
 	TransferWeights []types.DualWeight
 }
