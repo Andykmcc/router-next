@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"router/pkg/gtfs"
+	"router/pkg/transfer"
 	"router/pkg/types"
 	"router/pkg/utils"
 )
@@ -22,15 +23,20 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 	gtfsStopIdMap := enumerateGtfsStops(gtfsTable.Stops)
 	numStops := len(gtfsTable.Stops)
 	selfTransfers := extractSelfTransfers(gtfsTable.Transfers, gtfsStopIdMap)
+	transfers := transfer.CalculateTransfers(gtfsTable.Stops)
 
-	gtfsActiveTripIdMap := enumerateGtfsTrips(gtfsTable.TripsForDate(date))
+	// activeTrips is reused for both calls below: RaptorTripID values are
+	// indices into THIS slice, so iterateOverRaptorRoutes must be given the
+	// same slice, not gtfsTable.Trips (the full, differently-ordered list).
+	activeTrips := gtfsTable.TripsForDate(date)
+	gtfsActiveTripIdMap := enumerateGtfsTrips(activeTrips)
 
 	raptorTrips := groupRaptorTrips(gtfsTable.StopTimes, gtfsStopIdMap, gtfsActiveTripIdMap)
 	raptorRoutes := groupRaptorRoutes(raptorTrips)
 
 	routes, stopIdsByRoute, tripsByRoute, stopEventsByRoute, firstStopIdOfRoute,
 		firstTripOfRoute, numTripsInRoute, firstStopEventOfRoute, numRoutesForStop :=
-		iterateOverRaptorRoutes(raptorRoutes, gtfsTable.RoutesById, gtfsTable.Trips, numStops)
+		iterateOverRaptorRoutes(raptorRoutes, gtfsTable.RoutesById, activeTrips, numStops)
 
 	routeSegmentsByStop, firstRouteSegmentOfStop := groupRouteSegments(raptorRoutes, numRoutesForStop, numStops)
 
@@ -38,6 +44,7 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 		Stops:                   gtfsTable.Stops,
 		Routes:                  routes,
 		MinTransferTime:         selfTransfers,
+		Transfers:               *transfers,
 		StopIdsByRoute:          stopIdsByRoute,
 		FirstStopIdOfRoute:      firstStopIdOfRoute,
 		StopEventsByRoute:       stopEventsByRoute,
@@ -186,6 +193,9 @@ func groupRaptorRoutes(raptorTrips []RaptorTrip) []RaptorRoute {
 	return sortRoutes(groupTripsByStopSequence(raptorTrips))
 }
 
+// iterateOverRaptorRoutes indexes gtfsTrips by the RaptorTripID values baked
+// into raptorRoutes. gtfsTrips MUST be the same slice (by index) that produced
+// those IDs, or route metadata is silently misattributed.
 func iterateOverRaptorRoutes(
 	raptorRoutes []RaptorRoute,
 	routeMap map[gtfs.GTFSRouteID]*gtfs.GTFSRoute,

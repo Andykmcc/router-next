@@ -1,11 +1,21 @@
 package utils
 
 import (
+	"hash/fnv"
 	"reflect"
 	"router/pkg/types"
 	"strconv"
 	"strings"
 )
+
+// FNV64 returns the FNV-1a 64-bit hash of b as lowercase hex. Deterministic:
+// same bytes in, same string out, on every platform.
+func FNV64(b []byte) string {
+	h := fnv.New64a()
+	_, _ = h.Write(b)
+
+	return strconv.FormatUint(h.Sum64(), 16)
+}
 
 func Map[T any, U any](slice []T, f func(T) U) []U {
 	result := make([]U, len(slice))
@@ -31,33 +41,46 @@ func SizeOf[T any]() int {
 
 const SnapshotLineWidth = 20
 
-func SnapshotStr[T uint32 | types.StopID](arr []T) string {
-	N := len(arr)
-	numRows := N / SnapshotLineWidth
-	lastRowLength := N % SnapshotLineWidth
+func SnapshotStr[T uint32 | types.StopID | types.TransferMode](arr []T) string {
+	tokens := make([]string, len(arr))
+	for i := range arr {
+		tokens[i] = strconv.Itoa(int(arr[i]))
+	}
+
+	return snapshotRows(tokens)
+}
+
+func SnapshotDualWeights(arr []types.DualWeight) string {
+	tokens := make([]string, len(arr))
+	for i, w := range arr {
+		tokens[i] = strconv.Itoa(int(w.RealTime)) + ":" + strconv.Itoa(int(w.PenalizedCost))
+	}
+
+	return snapshotRows(tokens)
+}
+
+// snapshotRows joins tokens into comma-separated rows of SnapshotLineWidth,
+// rows separated by newlines, with no trailing newline. Empty input => "".
+func snapshotRows(tokens []string) string {
+	n := len(tokens)
+	numRows := n / SnapshotLineWidth
+	lastRowLength := n % SnapshotLineWidth
 
 	if lastRowLength > 0 {
-		numRows += 1
+		numRows++
 	}
 
 	rows := make([]string, numRows)
 	for rowIdx := range numRows {
 		start := rowIdx * SnapshotLineWidth
-		var end int
-		if rowIdx == numRows-1 {
+
+		end := start + SnapshotLineWidth
+		if rowIdx == numRows-1 && lastRowLength > 0 {
 			end = start + lastRowLength
-		} else {
-			end = start + SnapshotLineWidth
 		}
 
-		row := make([]string, end-start)
-		for i := start; i < end; i++ {
-			row[i-start] = strconv.Itoa(int(arr[i]))
-		}
-
-		rowStr := strings.Join(row, ",")
-		rows[rowIdx] = rowStr
+		rows[rowIdx] = strings.Join(tokens[start:end], ",")
 	}
-	str := strings.Join(rows, "\n")
-	return str
+
+	return strings.Join(rows, "\n")
 }

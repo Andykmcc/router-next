@@ -1,8 +1,10 @@
 package raptor
 
 import (
+	"encoding/binary"
 	"fmt"
 	"router/pkg/gtfs"
+	"router/pkg/transfer"
 	"router/pkg/types"
 	"router/pkg/utils"
 )
@@ -47,6 +49,7 @@ type RaptorTable struct {
 	Routes []gtfs.GTFSRoute
 
 	MinTransferTime StopTransferTimes
+	Transfers       transfer.TransferTable
 
 	StopIdsByRoute     []types.StopID
 	FirstStopIdOfRoute RouteStopOffsets
@@ -62,7 +65,54 @@ type RaptorTable struct {
 	FirstRouteSegmentOfStop StopRouteSegmentOffsets
 }
 
+// u32ColBytes serialises a uint32-backed column to little-endian bytes for a
+// deterministic checksum.
+func u32ColBytes[T ~uint32](col []T) []byte {
+	buf := make([]byte, 0, len(col)*4)
+	for _, v := range col {
+		buf = binary.LittleEndian.AppendUint32(buf, uint32(v))
+	}
+
+	return buf
+}
+
+// modeColBytes serialises the 1-byte-per-element transfer-mode column.
+func modeColBytes(col []types.TransferMode) []byte {
+	buf := make([]byte, len(col))
+	for i, v := range col {
+		buf[i] = byte(v)
+	}
+
+	return buf
+}
+
+// dualWeightColBytes serialises DualWeight pairs to little-endian bytes.
+func dualWeightColBytes(col []types.DualWeight) []byte {
+	buf := make([]byte, 0, len(col)*8)
+	for _, w := range col {
+		buf = binary.LittleEndian.AppendUint32(buf, w.RealTime)
+		buf = binary.LittleEndian.AppendUint32(buf, w.PenalizedCost)
+	}
+
+	return buf
+}
+
+// sampleEnds returns the first and last n elements of col for a head/tail
+// snapshot sample. For a column of n or fewer elements it returns the whole
+// column as head and nil as tail.
+func sampleEnds[T any](col []T, n int) (head, tail []T) {
+	if len(col) <= n {
+		return col, nil
+	}
+
+	return col[:n], col[len(col)-n:]
+}
+
 func (rt *RaptorTable) SnapshotString() string {
+	tgtHead, tgtTail := sampleEnds(rt.Transfers.TransferTarget, utils.SnapshotLineWidth)
+	modeHead, modeTail := sampleEnds(rt.Transfers.TransferModes, utils.SnapshotLineWidth)
+	wHead, wTail := sampleEnds(rt.Transfers.TransferWeights, utils.SnapshotLineWidth)
+
 	return fmt.Sprintf(
 		`
 MinTransferTime: %d
@@ -92,6 +142,25 @@ FirstStopEventOfRoute: %d
 FirstRouteSegmentOfStop: %d
 ---------------------------------------------------------------
 %s
+
+OffsetOfStop: %d
+---------------------------------------------------------------
+%s
+
+TransferTarget: %d checksum=%s
+---------------------------------------------------------------
+head: %s
+tail: %s
+
+TransferModes: %d checksum=%s
+---------------------------------------------------------------
+head: %s
+tail: %s
+
+TransferWeights: %d checksum=%s
+---------------------------------------------------------------
+head: %s
+tail: %s
 `,
 		len(rt.MinTransferTime),
 		utils.SnapshotStr(rt.MinTransferTime),
@@ -107,6 +176,20 @@ FirstRouteSegmentOfStop: %d
 		utils.SnapshotStr(rt.FirstStopEventOfRoute),
 		len(rt.FirstRouteSegmentOfStop),
 		utils.SnapshotStr(rt.FirstRouteSegmentOfStop),
+		len(rt.Transfers.OffsetOfStop),
+		utils.SnapshotStr(rt.Transfers.OffsetOfStop),
+		len(rt.Transfers.TransferTarget),
+		utils.FNV64(u32ColBytes(rt.Transfers.TransferTarget)),
+		utils.SnapshotStr(tgtHead),
+		utils.SnapshotStr(tgtTail),
+		len(rt.Transfers.TransferModes),
+		utils.FNV64(modeColBytes(rt.Transfers.TransferModes)),
+		utils.SnapshotStr(modeHead),
+		utils.SnapshotStr(modeTail),
+		len(rt.Transfers.TransferWeights),
+		utils.FNV64(dualWeightColBytes(rt.Transfers.TransferWeights)),
+		utils.SnapshotDualWeights(wHead),
+		utils.SnapshotDualWeights(wTail),
 	)
 }
 
@@ -155,10 +238,12 @@ func (rt *RaptorTable) Sizeof() int {
 	sizeTrips := len(rt.TripsByRoute)*utils.SizeOf[gtfs.GTFSTrip]() + 2*rt.NumRoutes()*4
 	sizeStopEvents := len(rt.StopEventsByRoute)*utils.SizeOf[StopEvent]() + rt.NumRoutes()*4
 	sizeRouteSegments := len(rt.RouteSegmentsByStop)*utils.SizeOf[RouteSegment]() + rt.NumStops()*4
+	sizeTransferCSR := len(rt.Transfers.OffsetOfStop)*4 + len(rt.Transfers.TransferTarget)*4 +
+		len(rt.Transfers.TransferModes)*1 + len(rt.Transfers.TransferWeights)*8
 
 	totalBytes :=
 		sizeTable + sizeStops + sizeRoutes + sizeTranfers +
-			sizeStopIds + sizeTrips + sizeStopEvents + sizeRouteSegments
+			sizeStopIds + sizeTrips + sizeStopEvents + sizeRouteSegments + sizeTransferCSR
 
 	return totalBytes
 }
