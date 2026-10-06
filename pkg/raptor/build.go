@@ -88,7 +88,12 @@ func extractSelfTransfers(
 			continue
 		}
 
-		stopId := stopIdMap[transfer.FromStopId]
+		stopId, ok := stopIdMap[transfer.FromStopId]
+		if !ok {
+			fmt.Printf("WARN: unknown stop_id %q in transfers\n", transfer.FromStopId)
+			continue
+		}
+
 		minTransferTime[stopId] = transfer.MinTransferTime
 	}
 
@@ -107,6 +112,7 @@ func groupRaptorTrips(
 			stopId, ok := stopIdMap[stopTime.GtfsStopId]
 			if !ok {
 				fmt.Printf("WARN: unknown stop_id %q\n", stopTime.GtfsStopId)
+				continue
 			}
 
 			raptorTrips[tripId] = append(raptorTrips[tripId], RaptorStopTime{
