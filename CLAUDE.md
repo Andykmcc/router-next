@@ -17,6 +17,8 @@ Go 1.26.1 (`.go-version`). The module is named `router`, so imports are `router/
 go build ./...
 go test ./...
 go test ./cmd/raptor -run TestRaptorBuild     # snapshot test; parses the 64 MB bundled feed (~3s)
+go test ./cmd/raptor -run TestRaptorTripsMatchGtfs
+go test ./pkg/raptor                          # small synthetic feeds, fast
 go test ./pkg/utils -run TestSnapshotStr
 go vet ./...
 golangci-lint run ./...
@@ -37,7 +39,7 @@ go run ./cmd/raptor serve -gtfs <zip> -port 3456                         # debug
 
 - Pre-commit (lefthook) runs `golangci-lint run --fix ./... ; git add {staged_files}` and `go vet ./...` in parallel. Because of the `;`, lint failures never block a commit, but `--fix` may rewrite and re-stage files. Vet failures do block.
 - `.golangci.yaml` (v2): `default: fast` plus `wsl_v5` (blank-line rules, `branch-max-lines: 2`) and `exhaustruct` (struct literals must set every field).
-- Main already has 13 lint issues (10 `wsl_v5`, plus `gocognit`, `testpackage`, `whitespace`). Don't add new ones.
+- Main already has 15 lint issues (12 `wsl_v5`, plus `gocognit`, `testpackage`, `whitespace`). The default `max-same-issues: 3` cap makes it report 13. Don't add new ones: `golangci-lint run --new-from-rev main ./...` should report 0.
 - CI (`.github/workflows/test.yml`) runs only `go build` and `go test` on pushes and PRs to `main`. It doesn't lint.
 
 ## Architecture
@@ -55,6 +57,8 @@ Pipeline: GTFS zip → `gtfs.ParseGtfs` → `*gtfs.GTFSTable` → `raptor.BuildR
 
 **`pkg/raptor`** builds and queries the timetable. Each table is built for one service date.
 - A RAPTOR route is a unique ordered stop sequence, **not** a GTFS route. One GTFS route usually becomes several RAPTOR routes.
+  - It can also hold trips from several GTFS routes that share a stop sequence (e.g. `SO:60` and `SO:60X`). `Routes[r]` is only the GTFS route of its first trip. Use `TripInRoute(r, t).GtfsRouteId` for a specific trip.
+- Stop times and transfers whose `stop_id` isn't in stops.txt are skipped with a WARN. A trip left with no stop times is dropped.
 - Routes are sorted by their stop-sequence key string, and trips within a route by first departure. That fixed ordering keeps the snapshots stable.
 - ID spaces:
   - `StopID` is the index into `gtfsTable.Stops`.
@@ -75,9 +79,6 @@ Pipeline: GTFS zip → `gtfs.ParseGtfs` → `*gtfs.GTFSTable` → `raptor.BuildR
 - `TestRaptorBuild` builds tables from the bundled feed for 2026-04-09 and 2026-04-20. It compares `SnapshotString()` with `cmd/raptor/snapshots/<date>.txt`.
   - **On a mismatch the test fails and also overwrites the snapshot**, so a second run passes. Check `git diff cmd/raptor/snapshots/` before accepting a change.
   - Snapshots cover only `MinTransferTime` and the ID and offset arrays. They don't cover `Stops`, `Routes`, `TripsByRoute`, `StopEventsByRoute` or `RouteSegmentsByStop`.
+- `TestRaptorTripsMatchGtfs` (`cmd/raptor/trips_test.go`) covers what the snapshots miss. It checks every trip in every RAPTOR route against its GTFS stop_times (stops plus arrival and departure times), and checks `Routes[r]` against the route's first trip.
+- `pkg/raptor/build_test.go` (package `raptor_test`) writes small GTFS zips into `t.TempDir()` and builds from them. `GTFSTable` has unexported fields, so going through `gtfs.ParseGtfs` is the only way to build one outside `pkg/gtfs`.
 - The bundled feed `cmd/raptor/testdata/gtfs_04162026.zip` is committed directly (not LFS). It's the 511 SF Bay regional feed with many agencies, not only SF Muni as the README says.
-
-## Known issues (unfixed)
-
-- `BuildRaptorTable` passes all of `gtfsTable.Trips` to `iterateOverRaptorRoutes`. That function indexes the list with `RaptorTripID`s, which are positions in `TripsForDate(date)`. As a result, `TripsByRoute` and `Routes` can hold the wrong trips and routes. The snapshots don't catch this.
-- In `groupRaptorTrips`, a stop time whose `stop_id` is unknown logs a WARN but is still added, with stop ID 0.

@@ -104,15 +104,21 @@ func tripMismatches(
 	}
 
 	stopTimes := stopTimesByTrip[trip.GtfsId]
-	stops := make([]types.StopID, len(stopTimes))
-	stopEvents := make([]raptor.StopEvent, len(stopTimes))
+	stops := make([]types.StopID, 0, len(stopTimes))
+	stopEvents := make([]raptor.StopEvent, 0, len(stopTimes))
 
-	for idx, stopTime := range stopTimes {
-		stops[idx] = stopIdMap[stopTime.GtfsStopId]
-		stopEvents[idx] = raptor.StopEvent{
+	for _, stopTime := range stopTimes {
+		// The build skips stop times whose stop_id isn't in stops.txt.
+		stopId, ok := stopIdMap[stopTime.GtfsStopId]
+		if !ok {
+			continue
+		}
+
+		stops = append(stops, stopId)
+		stopEvents = append(stopEvents, raptor.StopEvent{
 			ArrivalTime:   stopTime.ArrivalTime,
 			DepartureTime: stopTime.DepartureTime,
-		}
+		})
 	}
 
 	if !slices.Equal(stops, rt.StopsForRoute(routeId)) {
