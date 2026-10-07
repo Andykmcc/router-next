@@ -17,7 +17,7 @@ Go 1.26.1 (`.go-version`). The module is named `router`, so imports are `router/
 go build ./...
 go test ./...
 go test ./cmd/raptor -run TestRaptorBuild     # snapshot test; parses the 64 MB bundled feed (~3s)
-go test ./cmd/raptor -run TestRaptorTripsMatchGtfs
+go test ./cmd/raptor -run TestRaptorTripsMatchGtfs # parses the 64 MB bundled feed (~3s)
 go test ./pkg/raptor                          # small synthetic feeds, fast
 go test ./pkg/utils -run TestSnapshotStr
 go vet ./...
@@ -79,6 +79,6 @@ Pipeline: GTFS zip → `gtfs.ParseGtfs` → `*gtfs.GTFSTable` → `raptor.BuildR
 - `TestRaptorBuild` builds tables from the bundled feed for 2026-04-09 and 2026-04-20. It compares `SnapshotString()` with `cmd/raptor/snapshots/<date>.txt`.
   - **On a mismatch the test fails and also overwrites the snapshot**, so a second run passes. Check `git diff cmd/raptor/snapshots/` before accepting a change.
   - Snapshots cover only `MinTransferTime` and the ID and offset arrays. They don't cover `Stops`, `Routes`, `TripsByRoute`, `StopEventsByRoute` or `RouteSegmentsByStop`.
-- `TestRaptorTripsMatchGtfs` (`cmd/raptor/trips_test.go`) covers what the snapshots miss. It checks every trip in every RAPTOR route against its GTFS stop_times (stops plus arrival and departure times), and checks `Routes[r]` against the route's first trip.
+- `TestRaptorTripsMatchGtfs` (`cmd/raptor/trips_test.go`) covers what the snapshots miss. It checks every trip in every RAPTOR route against its GTFS stop_times (stops plus arrival and departure times), checks `Routes[r]` against the route's first trip, and checks that trips within a route are sorted by first departure.
 - `pkg/raptor/build_test.go` (package `raptor_test`) writes small GTFS zips into `t.TempDir()` and builds from them. `GTFSTable` has unexported fields, so going through `gtfs.ParseGtfs` is the only way to build one outside `pkg/gtfs`.
 - The bundled feed `cmd/raptor/testdata/gtfs_04162026.zip` is committed directly (not LFS). It's the 511 SF Bay regional feed with many agencies, not only SF Muni as the README says.

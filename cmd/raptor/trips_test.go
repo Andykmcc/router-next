@@ -38,27 +38,14 @@ func TestRaptorTripsMatchGtfs(t *testing.T) {
 	stopTimesByTrip := groupStopTimesByTrip(gtfsTable.StopTimes)
 
 	numTrips, numBadTrips, numBadRoutes := 0, 0, 0
+	numReported := 0
 
 	for routeId := range types.RouteID(rt.NumRoutes()) {
-		routeIsBad := false
+		routeNumTrips, routeNumBadTrips := checkRouteTrips(t, rt, routeId, stopTimesByTrip, stopIdMap, &numReported)
+		numTrips += routeNumTrips
+		numBadTrips += routeNumBadTrips
 
-		for tripIdx := range rt.NumTripsInRoute[routeId] {
-			numTrips++
-
-			problems := tripMismatches(rt, routeId, tripIdx, stopTimesByTrip, stopIdMap)
-			if len(problems) == 0 {
-				continue
-			}
-
-			numBadTrips++
-			routeIsBad = true
-
-			if numBadTrips <= maxReportedTripMismatches {
-				t.Errorf("route %d trip %d (%s): %v", routeId, tripIdx, rt.TripInRoute(routeId, tripIdx).GtfsId, problems)
-			}
-		}
-
-		if routeIsBad {
+		if routeNumBadTrips > 0 {
 			numBadRoutes++
 		}
 	}
@@ -67,6 +54,65 @@ func TestRaptorTripsMatchGtfs(t *testing.T) {
 		t.Errorf("%d of %d trips in %d of %d RAPTOR routes don't match their GTFS trip",
 			numBadTrips, numTrips, numBadRoutes, rt.NumRoutes())
 	}
+}
+
+// checkRouteTrips verifies every trip of one RAPTOR route against its GTFS trip
+// and reports the first mismatching trips, up to maxReportedTripMismatches in
+// total across routes (numReported is shared). It returns the number of trips
+// checked and the number that mismatched.
+func checkRouteTrips(
+	t *testing.T,
+	rt *raptor.RaptorTable,
+	routeId types.RouteID,
+	stopTimesByTrip map[gtfs.GTFSTripID][]gtfs.GTFSStopTime,
+	stopIdMap map[gtfs.GTFSStopID]types.StopID,
+	numReported *int,
+) (int, int) {
+	numTrips, numBadTrips := 0, 0
+	prevFirstDeparture := types.INFINITY
+
+	for tripIdx := range rt.NumTripsInRoute[routeId] {
+		numTrips++
+
+		problems := tripMismatches(rt, routeId, tripIdx, stopTimesByTrip, stopIdMap)
+
+		firstDeparture := rt.StopEventsForTrip(routeId, tripIdx)[0].DepartureTime
+		if orderProblem := tripOrderProblem(tripIdx, firstDeparture, prevFirstDeparture); orderProblem != "" {
+			problems = append(problems, orderProblem)
+		}
+
+		prevFirstDeparture = firstDeparture
+
+		if len(problems) == 0 {
+			continue
+		}
+
+		numBadTrips++
+
+		if *numReported >= maxReportedTripMismatches {
+			continue
+		}
+
+		*numReported++
+
+		t.Errorf("route %d trip %d (%s): %v", routeId, tripIdx, rt.TripInRoute(routeId, tripIdx).GtfsId, problems)
+	}
+
+	return numTrips, numBadTrips
+}
+
+// tripOrderProblem reports trips within a route that appear out of first-departure
+// order. The query in pkg/raptor/route.go scans trips in index order to find the
+// earliest catchable trip, so the build must sort trips by first departure. Trip 0
+// is never out of order, so callers pass types.INFINITY as the initial previous
+// departure.
+func tripOrderProblem(tripIdx uint32, firstDeparture types.Timestamp, prevFirstDeparture types.Timestamp) string {
+	if tripIdx == 0 || firstDeparture >= prevFirstDeparture {
+		return ""
+	}
+
+	return fmt.Sprintf("first departure %d < trip %d's %d (trips must be sorted by first departure)",
+		firstDeparture, tripIdx-1, prevFirstDeparture)
 }
 
 func groupStopTimesByTrip(stopTimes []gtfs.GTFSStopTime) map[gtfs.GTFSTripID][]gtfs.GTFSStopTime {
