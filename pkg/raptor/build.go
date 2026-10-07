@@ -23,14 +23,15 @@ func BuildRaptorTable(gtfsTable *gtfs.GTFSTable, date gtfs.GTFSDate) (*RaptorTab
 	numStops := len(gtfsTable.Stops)
 	selfTransfers := extractSelfTransfers(gtfsTable.Transfers, gtfsStopIdMap)
 
-	gtfsActiveTripIdMap := enumerateGtfsTrips(gtfsTable.TripsForDate(date))
+	activeTrips := gtfsTable.TripsForDate(date)
+	gtfsActiveTripIdMap := enumerateGtfsTrips(activeTrips)
 
 	raptorTrips := groupRaptorTrips(gtfsTable.StopTimes, gtfsStopIdMap, gtfsActiveTripIdMap)
 	raptorRoutes := groupRaptorRoutes(raptorTrips)
 
 	routes, stopIdsByRoute, tripsByRoute, stopEventsByRoute, firstStopIdOfRoute,
 		firstTripOfRoute, numTripsInRoute, firstStopEventOfRoute, numRoutesForStop :=
-		iterateOverRaptorRoutes(raptorRoutes, gtfsTable.RoutesById, gtfsTable.Trips, numStops)
+		iterateOverRaptorRoutes(raptorRoutes, gtfsTable.RoutesById, activeTrips, numStops)
 
 	routeSegmentsByStop, firstRouteSegmentOfStop := groupRouteSegments(raptorRoutes, numRoutesForStop, numStops)
 
@@ -88,7 +89,12 @@ func extractSelfTransfers(
 			continue
 		}
 
-		stopId := stopIdMap[transfer.FromStopId]
+		stopId, ok := stopIdMap[transfer.FromStopId]
+		if !ok {
+			fmt.Printf("WARN: unknown stop_id %q in transfers\n", transfer.FromStopId)
+			continue
+		}
+
 		minTransferTime[stopId] = transfer.MinTransferTime
 	}
 
@@ -107,6 +113,7 @@ func groupRaptorTrips(
 			stopId, ok := stopIdMap[stopTime.GtfsStopId]
 			if !ok {
 				fmt.Printf("WARN: unknown stop_id %q\n", stopTime.GtfsStopId)
+				continue
 			}
 
 			raptorTrips[tripId] = append(raptorTrips[tripId], RaptorStopTime{
@@ -189,7 +196,7 @@ func groupRaptorRoutes(raptorTrips []RaptorTrip) []RaptorRoute {
 func iterateOverRaptorRoutes(
 	raptorRoutes []RaptorRoute,
 	routeMap map[gtfs.GTFSRouteID]*gtfs.GTFSRoute,
-	gtfsTrips []gtfs.GTFSTrip,
+	activeTrips []gtfs.GTFSTrip, // indexed by RaptorTripID
 	numStops int,
 ) ([]gtfs.GTFSRoute, []types.StopID, []gtfs.GTFSTrip, []StopEvent, RouteStopOffsets,
 	RouteTripOffsets, []uint32, RouteStopEventOffsets, []uint32) {
@@ -210,7 +217,7 @@ func iterateOverRaptorRoutes(
 
 	for routeId, route := range raptorRoutes {
 		firstTripId := route.trips[0][0].tripId
-		firstTrip := gtfsTrips[firstTripId]
+		firstTrip := activeTrips[firstTripId]
 		gtfsRoute := *routeMap[firstTrip.GtfsRouteId]
 		routes[routeId] = gtfsRoute
 
@@ -223,7 +230,7 @@ func iterateOverRaptorRoutes(
 		firstStopEventOfRoute[routeId] = uint32(len(stopEventsByRoute))
 
 		for _, trip := range route.trips {
-			gtfsTrip := gtfsTrips[trip[0].tripId]
+			gtfsTrip := activeTrips[trip[0].tripId]
 			tripsByRoute = append(tripsByRoute, gtfsTrip)
 
 			for _, stopTime := range trip {
